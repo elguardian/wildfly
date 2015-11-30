@@ -85,6 +85,18 @@ public final class DriverProcessor implements DeploymentUnitProcessor {
                             .addService(ServiceName.JBOSS.append("jdbc-driver", driverName.replaceAll("\\.", "_")), driverService)
                             .addDependency(ConnectorServices.JDBC_DRIVER_REGISTRY_SERVICE, DriverRegistry.class,
                                     driverService.getDriverRegistryServiceInjector()).setInitialMode(Mode.ACTIVE).install();
+                    if(driverNames.size() > 1 && driverNames.indexOf(driverClassName) == 0) {
+                         final Driver defaultDriver = constructor.newInstance();
+                         String defaultDriverName = deploymentUnit.getName();
+                         InstalledDriver defaultDriverMetadata = new InstalledDriver(defaultDriverName, driverClass.getName(), null, null, majorVersion,
+                                 minorVersion, compliant);
+                         DriverService defaultDriverService = new DriverService(defaultDriverMetadata, defaultDriver);
+                         phaseContext
+                                 .getServiceTarget()
+                                 .addService(ServiceName.JBOSS.append("jdbc-driver", defaultDriverName.replaceAll("\\.", "_")), defaultDriverService)
+                                 .addDependency(ConnectorServices.JDBC_DRIVER_REGISTRY_SERVICE, DriverRegistry.class,
+                                    defaultDriverService.getDriverRegistryServiceInjector()).setInitialMode(Mode.ACTIVE).install();
+                    }
 
                 } catch (Exception e) {
                     DEPLOYER_JDBC_LOGGER.cannotInstantiateDriverClass(driverClassName, e);
