@@ -228,7 +228,7 @@ public class RecoveryWithAuthContextTestCase {
     // kill outbound (client bean... the one calling the transaction bean)
     // check the transaction in the inbound.
     // run the recovery in the outbound (auth should work)
-    // failure should be 
+    // failure should be
     @Test
     public void testRecoveryFailsWithoutAuthContext() throws Exception {
         try {
@@ -287,10 +287,19 @@ public class RecoveryWithAuthContextTestCase {
         applyUpdate(mcc, addOutboundSocketBindingOp(OUTBOUND_SOCKET, TestSuiteEnvironment.getServerAddress(), REMOTING_PORT));
         applyUpdate(mcc, addAuthenticationConfigurationOp(AUTH_CONFIG, REMOTING_PROTOCOL, PROPERTIES_REALM, USERNAME, PASSWORD));
         applyUpdate(mcc, addAuthenticationContextOp(AUTH_CONTEXT, AUTH_CONFIG));
-        // Intentionally NOT setting default-authentication-context on the elytron subsystem.
         applyUpdate(mcc, addOutboundConnectionOp(OUTBOUND_CONNECTION, OUTBOUND_SOCKET, AUTH_CONTEXT));
         applyUpdate(mcc, enableRecoveryListenerOp());
+        applyUpdate(mcc, setRecoveryAuthContextOp(AUTH_CONTEXT));
         ServerReload.executeReloadAndWaitForCompletion(outboundClient);
+    }
+
+    private static ModelNode setRecoveryAuthContextOp(String authContextName) {
+        ModelNode op = new ModelNode();
+        op.get(OP_ADDR).setEmptyList().add(SUBSYSTEM, "transactions");
+        op.get(OP).set(WRITE_ATTRIBUTE_OPERATION);
+        op.get(NAME).set("recovery-authentication-context");
+        op.get(VALUE).set(authContextName);
+        return op;
     }
 
     // -------------------------------------------------------------------------
