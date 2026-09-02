@@ -27,6 +27,7 @@ import org.jboss.msc.service.StopContext;
 import org.wildfly.extension.metrics.MetricCollector;
 import org.wildfly.extension.metrics.MetricRegistration;
 import org.wildfly.extension.metrics.MetricRegistry;
+import org.wildfly.extension.metrics.WildFlyMetricRegistry;
 import org.wildfly.service.AsyncServiceBuilder.Async;
 import org.wildfly.subsystem.service.AsyncServiceBuilder;
 
@@ -87,6 +88,11 @@ public class DeploymentMetricService implements Service {
     @Override
     public void stop(StopContext stopContext) {
         registration.unregister();
+        // Remove global boot-scan metrics for subsystem-side resources created by this deployment
+        // (e.g. Infinispan session cache). Those metrics carry the deployment name as a tag value
+        // (e.g. cache=my_app_war), so a tag scan is sufficient for cleanup.
+        ((WildFlyMetricRegistry) metricRegistry.get())
+                .unregisterByTagValue(deploymentAddress.getLastElement().getValue());
     }
 
     private static PathAddress createDeploymentAddressPrefix(DeploymentUnit deploymentUnit) {

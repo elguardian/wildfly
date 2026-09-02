@@ -69,6 +69,27 @@ public class WildFlyMetricRegistry implements Closeable, MetricRegistry {
         }
     }
 
+    /**
+     * Removes all metrics whose {@link MetricID} contains {@code rawValue} (converted to
+     * Prometheus format) as the value of any tag. Cleans up global boot-scan metrics registered
+     * for subsystem-side resources created by a deployment (e.g. Infinispan session cache) when
+     * the deployment is undeployed.
+     */
+    public void unregisterByTagValue(String rawValue) {
+        String tagValue = WildFlyMetricMetadata.getPrometheusMetricName(rawValue);
+        lock.writeLock().lock();
+        try {
+            metricMap.keySet().removeIf(id -> {
+                for (MetricMetadata.MetricTag tag : id.getTags()) {
+                    if (tag.getValue().equals(tagValue)) return true;
+                }
+                return false;
+            });
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
     @Override
     public void readLock() {
         lock.readLock().lock();
