@@ -31,7 +31,7 @@ public class NodeServiceServlet extends HttpServlet {
     static final String SERVLET_PATH = "/" + SERVLET_NAME;
     private static final String SERVICE = "service";
     private static final String EXPECTED = "expected";
-    private static final Duration TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration TIMEOUT = Duration.ofSeconds(15);
 
     public static URI createURI(URL baseURL, ServiceName serviceName) throws URISyntaxException {
         return baseURL.toURI().resolve(buildQuery(serviceName).toString());

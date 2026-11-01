@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicIntegerArray;
 import javax.naming.NamingException;
 
 import jakarta.ejb.EJBException;
@@ -78,6 +79,7 @@ public class LastNodeToLeaveRemoteEJBTestCase extends AbstractClusteringTestCase
     private static final String MODULE_NAME = LastNodeToLeaveRemoteEJBTestCase.class.getSimpleName();
 
     private static final long INVOCATION_WAIT = TimeoutUtil.adjust(1000);
+    private static final long INVOCATION_ATTEMPTS_TIMEOUT = TimeoutUtil.adjust(60_000);
     private static final int THREADS = 2;
 
     @Deployment(name = DEPLOYMENT_1, managed = false, testable = false)
@@ -104,6 +106,25 @@ public class LastNodeToLeaveRemoteEJBTestCase extends AbstractClusteringTestCase
                 .addClasses(Result.class, Incrementor.class, IncrementorBean.class, StatelessIncrementorBean.class)
                 .addAsManifestResource(PermissionUtils.createPermissionsXmlAsset(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
                 ;
+    }
+
+    /**
+     * Waits until every running client thread has completed two more invocation attempts, i.e. at least one attempt that started after this call.
+     */
+    private static void awaitInvocationAttempts(AtomicIntegerArray attempts, List<Future<?>> futures) throws InterruptedException {
+        int[] expected = new int[attempts.length()];
+        for (int i = 0; i < expected.length; ++i) {
+            expected[i] = attempts.get(i) + 2;
+        }
+        long stop = System.currentTimeMillis() + INVOCATION_ATTEMPTS_TIMEOUT;
+        for (int i = 0; i < expected.length; ++i) {
+            while (attempts.get(i) < expected[i] && !futures.get(i).isDone()) {
+                if (System.currentTimeMillis() > stop) {
+                    fail(String.format("Client thread %d did not complete %d invocation attempts within %d ms", i, expected[i], INVOCATION_ATTEMPTS_TIMEOUT));
+                }
+                Thread.sleep(10);
+            }
+        }
     }
 
     public static class CustomClusterNodeSelector implements ClusterNodeSelector {
@@ -160,7 +181,10 @@ public class LastNodeToLeaveRemoteEJBTestCase extends AbstractClusteringTestCase
         LOGGER.debugf("*** Started nodes = %s", getStartedNodes());
 
         ExecutorService executorService = Executors.newFixedThreadPool(THREADS);
+        // completed invocation attempts per client thread
+        AtomicIntegerArray attempts = new AtomicIntegerArray(THREADS);
         for (int i = 0; i < THREADS; ++i) {
+            int index = i;
             // start a client thread
             Runnable task = () -> {
                 LOGGER.debugf("%s *** Starting test thread %s%s", Thread.currentThread().getName());
@@ -184,10 +208,12 @@ public class LastNodeToLeaveRemoteEJBTestCase extends AbstractClusteringTestCase
                                 Result<Integer> result = bean.increment();
                                 String target = result.getNode();
                                 LOGGER.debugf("%s +++ Thread %s got result %s from node %s%n", Thread.currentThread().getName(), result.getValue(), target);
+                                attempts.incrementAndGet(index);
                                 Thread.sleep(INVOCATION_WAIT);
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
                             } catch (NoSuchEJBException e) {
+                                attempts.incrementAndGet(index);
                                 LOGGER.debugf("%n +++ Got NoSuchEJBException from node, skipping...%n");
                             }
                         }
@@ -205,34 +231,34 @@ public class LastNodeToLeaveRemoteEJBTestCase extends AbstractClusteringTestCase
             futures.add(executorService.submit(task));
         }
 
-        // Let the system stabilize
-        Thread.sleep(GRACE_TIME_TO_REPLICATE);
+        // Let the clients invoke
+        awaitInvocationAttempts(attempts, futures);
 
         // now shutdown the entire cluster then start one node back up again, to check last node behaviour
 
         LOGGER.debugf("%n *** Stopping node %s%n", NODE_3);
         stop(NODE_3);
         LOGGER.debugf("*** Started nodes = %s", getStartedNodes());
-        // Let the system stabilize
-        Thread.sleep(GRACE_TIME_TO_MEMBERSHIP_CHANGE);
+        // Let the clients invoke against the new membership
+        awaitInvocationAttempts(attempts, futures);
 
         LOGGER.debugf("%n*** Stopping node %s%n", NODE_2);
         stop(NODE_2);
         LOGGER.debugf("*** Started nodes = %s", getStartedNodes());
-        // Let the system stabilize
-        Thread.sleep(GRACE_TIME_TO_MEMBERSHIP_CHANGE);
+        // Let the clients invoke against the new membership
+        awaitInvocationAttempts(attempts, futures);
 
         LOGGER.debugf("%n *** Stopping node %s%n", NODE_1);
         stop(NODE_1);
         LOGGER.debugf("*** Started nodes = %s", getStartedNodes());
-        // Let the system stabilize
-        Thread.sleep(GRACE_TIME_TO_MEMBERSHIP_CHANGE);
+        // Let the clients invoke against the new membership
+        awaitInvocationAttempts(attempts, futures);
 
         LOGGER.debugf("%n *** Starting node %s%n", NODE_1);
         start(NODE_1);
         LOGGER.debugf("*** Started nodes = %s", getStartedNodes());
-        // Let the system stabilize
-        Thread.sleep(GRACE_TIME_TO_MEMBERSHIP_CHANGE);
+        // Let the clients invoke against the new membership
+        awaitInvocationAttempts(attempts, futures);
 
         // stop the client
         for (Future<?> future : futures) {

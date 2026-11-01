@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.time.Duration;
+import java.time.Instant;
 
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
@@ -23,6 +25,7 @@ import org.jboss.as.arquillian.api.ServerSetup;
 import org.jboss.as.test.clustering.ClusterDatabaseTestUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.shared.ManagementServerSetupTask;
+import org.jboss.as.test.shared.TimeoutUtil;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
@@ -42,6 +45,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 public class ClusteredJPA2LCTestCase extends AbstractClusteringTestCase {
 
     private static final String MODULE_NAME = ClusteredJPA2LCTestCase.class.getSimpleName();
+    private static final Duration CACHE_TIMEOUT = Duration.ofMillis(TimeoutUtil.adjust(15_000));
+    private static final Duration CACHE_POLL_INTERVAL = Duration.ofMillis(50);
 
     @Deployment(name = DEPLOYMENT_1, managed = false, testable = false)
     @TargetsContainer(NODE_1)
@@ -96,9 +101,8 @@ public class ClusteredJPA2LCTestCase extends AbstractClusteringTestCase {
         final String entityId = "1";
         createEntity(node0, entityId);
         assertTrue(isInCache(node0, entityId));
-        Thread.sleep(GRACE_TIME_TO_REPLICATE);
-        addToCache(node1, entityId);
-        assertTrue(isInCache(node1, entityId));
+        // node1 cannot cache the entity while the invalidation following its creation on node0 is still in progress
+        awaitAddedToCache(node1, entityId);
         evictFromCache(node1, entityId);
         assertFalse(isInCache(node0, entityId));
         assertFalse(isInCache(node1, entityId));
@@ -112,6 +116,18 @@ public class ClusteredJPA2LCTestCase extends AbstractClusteringTestCase {
     private void addToCache(WebTarget node, String entityId) {
         int status = node.path("cache").path(entityId).request().get().getStatus();
         assertEquals(204, status);
+    }
+
+    private void awaitAddedToCache(WebTarget node, String entityId) throws InterruptedException {
+        Instant stop = Instant.now().plus(CACHE_TIMEOUT);
+        do {
+            addToCache(node, entityId);
+            if (isInCache(node, entityId)) {
+                return;
+            }
+            Thread.sleep(CACHE_POLL_INTERVAL.toMillis());
+        } while (Instant.now().isBefore(stop));
+        fail(String.format("Entity %s was not cached within %s", entityId, CACHE_TIMEOUT));
     }
 
     private void evictFromCache(WebTarget node, String entityId) {

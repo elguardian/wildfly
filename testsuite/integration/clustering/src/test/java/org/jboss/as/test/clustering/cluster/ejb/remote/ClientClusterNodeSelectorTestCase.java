@@ -20,13 +20,13 @@ import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.OperateOnDeployment;
 import org.jboss.arquillian.container.test.api.TargetsContainer;
 import org.jboss.arquillian.junit5.ArquillianExtension;
+import org.jboss.as.test.clustering.ClusterTestUtil;
 import org.jboss.arquillian.test.api.ArquillianResource;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Heartbeat;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.HeartbeatBean;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Result;
 import org.jboss.as.test.clustering.ejb.EJBDirectory;
-import org.jboss.as.test.shared.PermissionUtils;
 import org.jboss.ejb.client.ClusterNodeSelector;
 import org.jboss.ejb.client.EJBClientConnection;
 import org.jboss.ejb.client.EJBClientContext;
@@ -133,7 +133,8 @@ public class ClientClusterNodeSelectorTestCase extends AbstractClusteringTestCas
             // first call goes to connected node regardless of CustomClusterNodeSelector
             // ====================================================================================
             Result<Date> res = bean.pulse();
-            Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+            // Wait until the cluster topology pushed to EJB clients contains all nodes
+            ClusterTestUtil.establishClientMappings(ctx, MODULE_NAME, NODE_1_2_3_4);
 
             // ====================================================================================
             // subsequent calls must be routed to the node selected by the CustomClusterNodeSelector
@@ -168,10 +169,10 @@ public class ClientClusterNodeSelectorTestCase extends AbstractClusteringTestCas
      * Test archive containing the Jakarta Enterprise Beans to call
      */
     private static Archive<?> createDeployment() {
-        return ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar")
+        return ClusterTestUtil.addClientMappingsListener(ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar"))
                 .addPackage(EJBDirectory.class.getPackage())
                 .addClasses(Result.class, Heartbeat.class, HeartbeatBean.class, RandomUtils.class)
-                .addAsManifestResource(PermissionUtils.createPermissionsXmlAsset(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
+                .addAsManifestResource(ClusterTestUtil.clientMappingsListenerPermissions(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
                 ;
     }
 }

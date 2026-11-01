@@ -28,6 +28,7 @@ import org.jboss.arquillian.container.test.api.OperateOnDeployment;
 import org.jboss.arquillian.container.test.api.TargetsContainer;
 import org.jboss.arquillian.junit5.ArquillianExtension;
 import org.jboss.arquillian.test.api.ArquillianResource;
+import org.jboss.as.test.clustering.ActiveRequestsUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.clustering.single.web.Mutable;
 import org.jboss.as.test.clustering.single.web.SimpleServlet;
@@ -127,8 +128,8 @@ public class DistributableTestCase extends AbstractClusteringTestCase {
                 HttpClientUtils.closeQuietly(response);
             }
 
-            // Lets wait for the session to replicate
-            Thread.sleep(GRACE_TIME_TO_REPLICATE);
+            // Wait for the session write of the previous request to complete
+            this.awaitRequestCompletion();
 
             // Now check on the 2nd server
             response = client.execute(new HttpGet(url2));
@@ -183,13 +184,16 @@ public class DistributableTestCase extends AbstractClusteringTestCase {
                 HttpClientUtils.closeQuietly(response);
             }
 
+            // Wait for the session write of the previous request to complete, so that only the long request counts as active
+            this.awaitRequestCompletion();
+
             // Send a long request - in parallel
             URI longRunningURI = SimpleServlet.createURI(baseURL, REQUEST_DURATION);
             ExecutorService executor = Executors.newSingleThreadExecutor();
             Future<HttpResponse> future = executor.submit(new RequestTask(client, longRunningURI));
 
             // Make sure long request has started
-            Thread.sleep(1000);
+            ActiveRequestsUtil.awaitActiveRequest(NODE_1);
 
             lifecycle.stop(NODE_1);
 

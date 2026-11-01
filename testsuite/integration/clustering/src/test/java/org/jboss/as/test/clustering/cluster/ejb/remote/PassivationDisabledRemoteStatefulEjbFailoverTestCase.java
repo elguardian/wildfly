@@ -8,12 +8,14 @@ package org.jboss.as.test.clustering.cluster.ejb.remote;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.PropertyPermission;
+import java.util.stream.Collectors;
 
 import jakarta.ejb.NoSuchEJBException;
 
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.TargetsContainer;
 import org.jboss.arquillian.junit5.ArquillianExtension;
+import org.jboss.as.test.clustering.ClusterTestUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Incrementor;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.IncrementorBean;
@@ -21,7 +23,6 @@ import org.jboss.as.test.clustering.cluster.ejb.remote.bean.PassivationDisabledS
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Result;
 import org.jboss.as.test.clustering.ejb.EJBDirectory;
 import org.jboss.as.test.clustering.ejb.RemoteEJBDirectory;
-import org.jboss.as.test.shared.PermissionUtils;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
@@ -54,10 +55,10 @@ public class PassivationDisabledRemoteStatefulEjbFailoverTestCase extends Abstra
     }
 
     private static Archive<?> createDeployment() {
-        return ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar")
+        return ClusterTestUtil.addClientMappingsListener(ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar"))
                 .addPackage(EJBDirectory.class.getPackage())
                 .addClasses(Result.class, Incrementor.class, IncrementorBean.class, PassivationDisabledStatefulIncrementorBean.class)
-                .addAsManifestResource(PermissionUtils.createPermissionsXmlAsset(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
+                .addAsManifestResource(ClusterTestUtil.clientMappingsListenerPermissions(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
                 ;
     }
 
@@ -87,7 +88,8 @@ public class PassivationDisabledRemoteStatefulEjbFailoverTestCase extends Abstra
 
             undeploy(findDeployment(target));
 
-            Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+            // Wait until the cluster topology pushed to EJB clients no longer contains the undeployed node
+            ClusterTestUtil.establishClientMappings(directory, NODE_1_2.stream().filter(node -> !node.equals(target)).collect(Collectors.toSet()));
 
             try {
                 result = bean.increment();

@@ -28,6 +28,7 @@ import org.infinispan.notifications.Listener;
 import org.infinispan.notifications.Listener.Observation;
 import org.infinispan.notifications.cachelistener.annotation.TopologyChanged;
 import org.infinispan.notifications.cachelistener.event.TopologyChangedEvent;
+import org.infinispan.topology.CacheTopology;
 import org.infinispan.util.concurrent.BlockingManager;
 import org.jboss.logging.Logger;
 
@@ -58,8 +59,14 @@ public class TopologyChangeListenerBean implements TopologyChangeListener {
             Instant start = now;
             Instant stop = now.plus(timeout);
             try {
-                while (!currentTopology.equals(desiredTopology) && now.isBefore(stop)) {
-                    logger.infof("%s != %s, waiting for a topology change event. Current topology id = %d", desiredTopology, currentTopology, topology.getTopologyId());
+                // Wait for the desired members *and* for any rebalance to complete:
+                // while a rebalance is in progress the primary owner of a key (and hence e.g. a session's route) can still change
+                while ((!currentTopology.equals(desiredTopology) || topology.getPhase() != CacheTopology.Phase.NO_REBALANCE) && now.isBefore(stop)) {
+                    if (currentTopology.equals(desiredTopology)) {
+                        logger.infof("Cache %s/%s has topology %s, waiting for rebalance to complete. Current topology id = %d, phase = %s", containerName, cacheName, desiredTopology, topology.getTopologyId(), topology.getPhase());
+                    } else {
+                        logger.infof("%s != %s, waiting for a topology change event. Current topology id = %d", desiredTopology, currentTopology, topology.getTopologyId());
+                    }
                     long millis = Duration.between(Instant.now(), stop).toMillis();
                     if (millis > 0) {
                         listener.wait(millis);
@@ -68,8 +75,8 @@ public class TopologyChangeListenerBean implements TopologyChangeListener {
                     currentTopology = getMembers(topology);
                     now = Instant.now();
                 }
-                if (!currentTopology.equals(desiredTopology)) {
-                    throw new TimeoutException(String.format("Cache %s/%s failed to establish topology %s within %s. Current view is: %s", containerName, cacheName, desiredTopology, timeout, currentTopology));
+                if (!currentTopology.equals(desiredTopology) || topology.getPhase() != CacheTopology.Phase.NO_REBALANCE) {
+                    throw new TimeoutException(String.format("Cache %s/%s failed to establish topology %s within %s. Current view is: %s, phase = %s", containerName, cacheName, desiredTopology, timeout, currentTopology, topology.getPhase()));
                 }
                 logger.infof("Cache %s/%s successfully established topology %s in %s. Topology id = %d", containerName, cacheName, desiredTopology, Duration.between(start, now), topology.getTopologyId());
             } catch (InterruptedException e) {

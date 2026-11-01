@@ -6,13 +6,18 @@ package org.jboss.as.test.clustering.cluster.xsite;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
+import java.time.Duration;
+import java.time.Instant;
 
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.utils.HttpClientUtils;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.OperateOnDeployment;
@@ -23,6 +28,7 @@ import org.jboss.as.arquillian.api.ServerSetup;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.http.util.TestHttpClientUtils;
 import org.jboss.as.test.shared.ManagementServerSetupTask;
+import org.jboss.as.test.shared.TimeoutUtil;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.asset.StringAsset;
@@ -56,6 +62,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 public class XSiteSimpleTestCase extends AbstractClusteringTestCase {
 
     private static final String MODULE_NAME = XSiteSimpleTestCase.class.getSimpleName();
+    private static final Duration REPLICATION_TIMEOUT = Duration.ofMillis(TimeoutUtil.adjust(15_000));
+    private static final Duration REPLICATION_POLL_INTERVAL = Duration.ofMillis(50);
 
     public XSiteSimpleTestCase() {
         super(NODE_1_2_3_4);
@@ -135,26 +143,14 @@ public class XSiteSimpleTestCase extends AbstractClusteringTestCase {
             assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
             response.getEntity().getContent().close();
 
-            // Lets wait for the session to replicate
-            Thread.sleep(GRACE_TIME_TO_REPLICATE);
-
             // do a get on LON-1
-            response = client.execute(new HttpGet(url2));
-            assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
-            assertEquals(value, response.getFirstHeader("value").getValue());
-            response.getEntity().getContent().close();
+            awaitValue(client, url2, value);
 
             // do a get on NYC-0
-            response = client.execute(new HttpGet(url3));
-            assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
-            assertEquals(value, response.getFirstHeader("value").getValue());
-            response.getEntity().getContent().close();
+            awaitValue(client, url3, value);
 
             // do a get on SFO-0
-            response = client.execute(new HttpGet(url4));
-            assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
-            assertEquals(value, response.getFirstHeader("value").getValue());
-            response.getEntity().getContent().close();
+            awaitValue(client, url4, value);
         }
 
         /*
@@ -181,6 +177,30 @@ public class XSiteSimpleTestCase extends AbstractClusteringTestCase {
             assertEquals(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, response.getStatusLine().getStatusCode());
             response.getEntity().getContent().close();
         }
+    }
+
+    /**
+     * Polls the given get URI until it returns the expected value.
+     * Backups are synchronous, so this normally succeeds on the first attempt; polling tolerates a site bridge that is still being established.
+     */
+    private static void awaitValue(CloseableHttpClient client, URI uri, String expected) throws IOException, InterruptedException {
+        Instant stop = Instant.now().plus(REPLICATION_TIMEOUT);
+        String last;
+        do {
+            HttpResponse response = client.execute(new HttpGet(uri));
+            try {
+                int status = response.getStatusLine().getStatusCode();
+                Header header = response.getFirstHeader("value");
+                if (status == HttpServletResponse.SC_OK && header != null && expected.equals(header.getValue())) {
+                    return;
+                }
+                last = status + (header != null ? " value=" + header.getValue() : "");
+            } finally {
+                HttpClientUtils.closeQuietly(response);
+            }
+            Thread.sleep(REPLICATION_POLL_INTERVAL.toMillis());
+        } while (Instant.now().isBefore(stop));
+        fail(String.format("%s did not return value %s within %s, last response: %s", uri, expected, REPLICATION_TIMEOUT, last));
     }
 
     public static class CacheSetupTask extends ManagementServerSetupTask {

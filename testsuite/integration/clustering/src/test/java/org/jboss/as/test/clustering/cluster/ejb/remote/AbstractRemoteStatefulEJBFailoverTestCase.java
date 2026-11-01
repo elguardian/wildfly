@@ -8,15 +8,18 @@ package org.jboss.as.test.clustering.cluster.ejb.remote;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.PropertyPermission;
+import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import org.jboss.arquillian.junit5.ArquillianExtension;
+import org.jboss.as.test.clustering.ClusterTestUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Incrementor;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.IncrementorBean;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Result;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.StatefulIncrementorBean;
 import org.jboss.as.test.clustering.ejb.EJBDirectory;
-import org.jboss.as.test.shared.PermissionUtils;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
@@ -33,10 +36,10 @@ public abstract class AbstractRemoteStatefulEJBFailoverTestCase extends Abstract
     private static final int COUNT = 20;
 
     static Archive<?> createDeployment(String moduleName) {
-        return ShrinkWrap.create(JavaArchive.class, moduleName + ".jar")
+        return ClusterTestUtil.addClientMappingsListener(ShrinkWrap.create(JavaArchive.class, moduleName + ".jar"))
                 .addPackage(EJBDirectory.class.getPackage())
                 .addClasses(Result.class, Incrementor.class, IncrementorBean.class, StatefulIncrementorBean.class)
-                .addAsManifestResource(PermissionUtils.createPermissionsXmlAsset(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
+                .addAsManifestResource(ClusterTestUtil.clientMappingsListenerPermissions(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
                 ;
     }
 
@@ -66,7 +69,8 @@ public abstract class AbstractRemoteStatefulEJBFailoverTestCase extends Abstract
 
             undeploy(this.findDeployment(target));
 
-            Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+            // Wait until the cluster topology pushed to EJB clients no longer contains the undeployed node
+            ClusterTestUtil.establishClientMappings(directory, others(target));
 
             result = bean.increment();
             // Bean should failover to other node
@@ -77,8 +81,8 @@ public abstract class AbstractRemoteStatefulEJBFailoverTestCase extends Abstract
 
             deploy(this.findDeployment(target));
 
-            // Allow sufficient time for client to receive new topology
-            Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+            // Wait until the cluster topology pushed to EJB clients contains both nodes again
+            ClusterTestUtil.establishClientMappings(directory, NODE_1_2);
 
             result = bean.increment();
             String failbackTarget = result.getNode();
@@ -109,8 +113,8 @@ public abstract class AbstractRemoteStatefulEJBFailoverTestCase extends Abstract
 
             start(target);
 
-            // Allow sufficient time for client to receive new topology
-            Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+            // Wait until the cluster topology pushed to EJB clients contains both nodes again
+            ClusterTestUtil.establishClientMappings(directory, NODE_1_2);
 
             result = bean.increment();
             failbackTarget = result.getNode();
@@ -132,5 +136,9 @@ public abstract class AbstractRemoteStatefulEJBFailoverTestCase extends Abstract
 
             bean.remove();
         }
+    }
+
+    private static Set<String> others(String node) {
+        return NODE_1_2.stream().filter(Predicate.not(node::equals)).collect(Collectors.toSet());
     }
 }

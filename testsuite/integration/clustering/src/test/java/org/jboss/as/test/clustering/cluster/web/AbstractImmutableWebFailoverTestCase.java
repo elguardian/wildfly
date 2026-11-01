@@ -12,6 +12,7 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -64,11 +65,12 @@ public abstract class AbstractImmutableWebFailoverTestCase extends AbstractClust
     }
 
     private void testFailover(Lifecycle lifecycle, URL baseURL1, URL baseURL2, URL baseURL3) throws Exception {
+        Map<String, URL> baseURLs = Map.of(NODE_1, baseURL1, NODE_2, baseURL2, NODE_3, baseURL3);
         URI uri1 = SimpleServlet.createURI(baseURL1);
         URI uri2 = SimpleServlet.createURI(baseURL2);
         URI uri3 = SimpleServlet.createURI(baseURL3);
 
-        this.establishTopology(baseURL1, NODE_1_2_3);
+        this.establishTopology(baseURLs, NODE_1_2_3);
 
         AtomicReference<String> sessionId = new AtomicReference<>();
 
@@ -150,12 +152,10 @@ public abstract class AbstractImmutableWebFailoverTestCase extends AbstractClust
         }
     }
 
-    private void establishTopology(URL baseURL, Set<String> topology) throws URISyntaxException, IOException, InterruptedException {
-        TopologyChangeListenerUtil.establishTopology(baseURL, "web", this.deploymentName, topology);
-
-        // TODO we should be able to speed this up by observing changes in the routing registry
-        // prevents failing assertions when topology information is expected, e.g.:
-        //java.lang.AssertionError: expected null, but was:<bpAmUlICzeXMtFiOJvTiOCASbXNivRdHTIlQC00c=node-2>
-        Thread.sleep(GRACE_TIME_TOPOLOGY_CHANGE);
+    private void establishTopology(Map<String, URL> baseURLs, Set<String> topology) throws URISyntaxException, IOException {
+        // Wait on every member for the topology and for rebalancing to complete, after which the primary owner, i.e. the route, of a session is stable
+        for (String member : new TreeSet<>(topology)) {
+            TopologyChangeListenerUtil.establishTopology(baseURLs.get(member), "web", this.deploymentName, topology);
+        }
     }
 }

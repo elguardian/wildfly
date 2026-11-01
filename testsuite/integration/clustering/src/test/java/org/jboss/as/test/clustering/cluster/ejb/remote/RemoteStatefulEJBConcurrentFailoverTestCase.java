@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.TargetsContainer;
 import org.jboss.arquillian.junit5.ArquillianExtension;
+import org.jboss.as.test.clustering.ClusterTestUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Incrementor;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.IncrementorBean;
@@ -26,7 +27,6 @@ import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Result;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.SlowStatefulIncrementorBean;
 import org.jboss.as.test.clustering.ejb.EJBDirectory;
 import org.jboss.as.test.clustering.ejb.RemoteEJBDirectory;
-import org.jboss.as.test.shared.PermissionUtils;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
@@ -54,10 +54,10 @@ public class RemoteStatefulEJBConcurrentFailoverTestCase extends AbstractCluster
     }
 
     private static Archive<?> createDeployment() {
-        return ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar")
+        return ClusterTestUtil.addClientMappingsListener(ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar"))
                 .addPackage(EJBDirectory.class.getPackage())
                 .addClasses(Result.class, Incrementor.class, IncrementorBean.class, SlowStatefulIncrementorBean.class)
-                .addAsManifestResource(PermissionUtils.createPermissionsXmlAsset(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
+                .addAsManifestResource(ClusterTestUtil.clientMappingsListenerPermissions(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
                 ;
     }
 
@@ -72,8 +72,8 @@ public class RemoteStatefulEJBConcurrentFailoverTestCase extends AbstractCluster
 
             AtomicInteger count = new AtomicInteger();
 
-            // Allow sufficient time for client to receive full topology
-            Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+            // Wait until the cluster topology pushed to EJB clients contains both nodes
+            ClusterTestUtil.establishClientMappings(directory, NODE_1_2);
 
             String target = bean.increment().getNode();
             count.incrementAndGet();

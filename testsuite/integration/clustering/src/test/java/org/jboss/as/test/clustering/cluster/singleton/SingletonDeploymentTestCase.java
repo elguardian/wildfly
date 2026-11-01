@@ -5,14 +5,17 @@
 
 package org.jboss.as.test.clustering.cluster.singleton;
 
+import static org.jboss.as.test.clustering.ClusterTestUtil.awaitManagementResult;
 import static org.jboss.as.test.clustering.ClusterTestUtil.execute;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.net.URI;
 import java.net.URL;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -26,11 +29,11 @@ import org.jboss.arquillian.junit5.ArquillianExtension;
 import org.jboss.arquillian.test.api.ArquillianResource;
 import org.jboss.as.arquillian.api.ServerSetup;
 import org.jboss.as.arquillian.container.ManagementClient;
+import org.jboss.as.test.clustering.ClusterTestUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.clustering.cluster.singleton.servlet.TraceServlet;
 import org.jboss.as.test.http.util.TestHttpClientUtils;
 import org.jboss.as.test.shared.ManagementServerSetupTask;
-import org.jboss.as.test.shared.TimeoutUtil;
 import org.jboss.dmr.ModelNode;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
@@ -69,8 +72,6 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
         return war;
     }
 
-    public static final int DELAY = TimeoutUtil.adjust(5000);
-
     private final String moduleName;
     private final String deploymentName;
 
@@ -87,10 +88,15 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
             @ArquillianResource(TraceServlet.class) @OperateOnDeployment(DEPLOYMENT_2) URL baseURL2)
             throws Exception {
 
+        URI uri1 = TraceServlet.createURI(new URL(baseURL1.getProtocol(), baseURL1.getHost(), baseURL1.getPort(), "/" + this.moduleName + "/"));
+        URI uri2 = TraceServlet.createURI(new URL(baseURL2.getProtocol(), baseURL2.getHost(), baseURL2.getPort(), "/" + this.moduleName + "/"));
+
         this.deploy(SINGLETON_DEPLOYMENT_1);
-        Thread.sleep(DELAY);
+        this.awaitElection(client1, NODE_1, NODE_1);
         this.deploy(SINGLETON_DEPLOYMENT_2);
-        Thread.sleep(DELAY);
+        this.awaitElection(client1, NODE_1, NODE_1, NODE_2);
+        this.awaitElection(client2, NODE_1, NODE_1, NODE_2);
+        awaitActivation(uri1, uri2);
 
         String primaryProviderRequest = String.format("/subsystem=singleton/singleton-policy=default/deployment=%s:read-attribute(name=primary-provider)", this.deploymentName);
         String isPrimaryRequest = String.format("/subsystem=singleton/singleton-policy=default/deployment=%s:read-attribute(name=is-primary)", this.deploymentName);
@@ -103,9 +109,6 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
         assertFalse(execute(client2, isPrimaryRequest).asBoolean(true));
         assertEquals(List.of(NODE_1, NODE_2), execute(client2, getProvidersRequest).asList().stream().map(ModelNode::asString).sorted().collect(Collectors.toList()));
 
-        URI uri1 = TraceServlet.createURI(new URL(baseURL1.getProtocol(), baseURL1.getHost(), baseURL1.getPort(), "/" + this.moduleName + "/"));
-        URI uri2 = TraceServlet.createURI(new URL(baseURL2.getProtocol(), baseURL2.getHost(), baseURL2.getPort(), "/" + this.moduleName + "/"));
-
         try (CloseableHttpClient client = TestHttpClientUtils.promiscuousCookieHttpClient()) {
             try (CloseableHttpResponse response = client.execute(new HttpGet(uri1))) {
                 assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
@@ -117,7 +120,8 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
 
             this.undeploy(SINGLETON_DEPLOYMENT_1);
 
-            Thread.sleep(DELAY);
+            this.awaitElection(client2, NODE_2, NODE_2);
+            awaitActivation(uri2, uri1);
 
             assertEquals(NODE_2, execute(client2, primaryProviderRequest).asStringOrNull());
             assertTrue(execute(client2, isPrimaryRequest).asBoolean(false));
@@ -133,7 +137,9 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
 
             this.deploy(SINGLETON_DEPLOYMENT_1);
 
-            Thread.sleep(DELAY);
+            this.awaitElection(client1, NODE_1, NODE_1, NODE_2);
+            this.awaitElection(client2, NODE_1, NODE_1, NODE_2);
+            awaitActivation(uri1, uri2);
 
             assertEquals(NODE_1, execute(client1, primaryProviderRequest).asStringOrNull());
             assertTrue(execute(client1, isPrimaryRequest).asBoolean(false));
@@ -152,7 +158,8 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
 
             this.undeploy(SINGLETON_DEPLOYMENT_2);
 
-            Thread.sleep(DELAY);
+            this.awaitElection(client1, NODE_1, NODE_1);
+            awaitActivation(uri1, uri2);
 
             assertEquals(NODE_1, execute(client1, primaryProviderRequest).asStringOrNull());
             assertTrue(execute(client1, isPrimaryRequest).asBoolean(false));
@@ -168,7 +175,9 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
 
             this.deploy(SINGLETON_DEPLOYMENT_2);
 
-            Thread.sleep(DELAY);
+            this.awaitElection(client1, NODE_1, NODE_1, NODE_2);
+            this.awaitElection(client2, NODE_1, NODE_1, NODE_2);
+            awaitActivation(uri1, uri2);
 
             assertEquals(NODE_1, execute(client1, primaryProviderRequest).asStringOrNull());
             assertTrue(execute(client1, isPrimaryRequest).asBoolean(false));
@@ -186,10 +195,56 @@ public abstract class SingletonDeploymentTestCase extends AbstractClusteringTest
             }
         } finally {
             this.undeploy(SINGLETON_DEPLOYMENT_1);
-            Thread.sleep(DELAY);
             this.undeploy(SINGLETON_DEPLOYMENT_2);
-            Thread.sleep(DELAY);
+            // Wait until neither node has the singleton deployment any more
+            this.awaitUndeployed(client1);
+            this.awaitUndeployed(client2);
         }
+    }
+
+    /**
+     * Polls the singleton policy of a node until the singleton deployment has the expected primary provider and providers.
+     */
+    private void awaitElection(ManagementClient client, String primary, String... providers) throws Exception {
+        List<String> expectedProviders = Stream.of(providers).sorted().toList();
+        String resource = String.format("/subsystem=singleton/singleton-policy=default/deployment=%s", this.deploymentName);
+        awaitManagementResult(client, resource + ":read-attribute(name=providers)",
+                result -> result.isDefined() && result.asList().stream().map(ModelNode::asString).sorted().toList().equals(expectedProviders));
+        awaitManagementResult(client, resource + ":read-attribute(name=primary-provider)", result -> primary.equals(result.asStringOrNull()));
+    }
+
+    /**
+     * Polls until the singleton deployment is active, i.e. serving requests, on the elected node and inactive on the other.
+     * Election completes before the elected node has started the deployment (and before the previous primary has stopped it).
+     */
+    private static void awaitActivation(URI primary, URI other) throws Exception {
+        awaitStatus(primary, HttpServletResponse.SC_OK);
+        awaitStatus(other, HttpServletResponse.SC_NOT_FOUND);
+    }
+
+    private static void awaitStatus(URI uri, int status) throws Exception {
+        Instant stop = Instant.now().plus(ClusterTestUtil.MANAGEMENT_POLL_TIMEOUT);
+        try (CloseableHttpClient client = TestHttpClientUtils.promiscuousCookieHttpClient()) {
+            int last;
+            do {
+                try (CloseableHttpResponse response = client.execute(new HttpGet(uri))) {
+                    last = response.getStatusLine().getStatusCode();
+                }
+                if (last == status) {
+                    return;
+                }
+                Thread.sleep(20);
+            } while (Instant.now().isBefore(stop));
+            fail(String.format("%s still returns %d instead of %d", uri, last, status));
+        }
+    }
+
+    /**
+     * Polls the singleton policy of a node until it no longer has the singleton deployment.
+     */
+    private void awaitUndeployed(ManagementClient client) throws Exception {
+        awaitManagementResult(client, "/subsystem=singleton/singleton-policy=default:read-children-names(child-type=deployment)",
+                result -> !result.isDefined() || result.asList().stream().map(ModelNode::asString).noneMatch(this.deploymentName::equals));
     }
 
     public static class ServerSetupTask extends ManagementServerSetupTask {

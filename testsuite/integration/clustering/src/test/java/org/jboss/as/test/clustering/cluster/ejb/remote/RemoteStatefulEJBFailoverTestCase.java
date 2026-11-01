@@ -5,20 +5,10 @@
 
 package org.jboss.as.test.clustering.cluster.ejb.remote;
 
-import java.util.PropertyPermission;
-
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.TargetsContainer;
-import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Incrementor;
-import org.jboss.as.test.clustering.cluster.ejb.remote.bean.IncrementorBean;
-import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Result;
-import org.jboss.as.test.clustering.cluster.ejb.remote.bean.StatefulIncrementorBean;
-import org.jboss.as.test.clustering.ejb.EJBDirectory;
 import org.jboss.as.test.clustering.ejb.RemoteEJBDirectory;
-import org.jboss.as.test.shared.PermissionUtils;
 import org.jboss.shrinkwrap.api.Archive;
-import org.jboss.shrinkwrap.api.ShrinkWrap;
-import org.jboss.shrinkwrap.api.spec.JavaArchive;
 
 /**
  * @author Paul Ferraro
@@ -29,21 +19,13 @@ public class RemoteStatefulEJBFailoverTestCase extends AbstractRemoteStatefulEJB
     @Deployment(name = DEPLOYMENT_1, managed = false, testable = false)
     @TargetsContainer(NODE_1)
     public static Archive<?> createDeploymentForContainer1() {
-        return createDeployment();
+        return createDeployment(MODULE_NAME);
     }
 
     @Deployment(name = DEPLOYMENT_2, managed = false, testable = false)
     @TargetsContainer(NODE_2)
     public static Archive<?> createDeploymentForContainer2() {
-        return createDeployment();
-    }
-
-    private static Archive<?> createDeployment() {
-        return ShrinkWrap.create(JavaArchive.class, MODULE_NAME + ".jar")
-                .addPackage(EJBDirectory.class.getPackage())
-                .addClasses(Result.class, Incrementor.class, IncrementorBean.class, StatefulIncrementorBean.class)
-                .addAsManifestResource(PermissionUtils.createPermissionsXmlAsset(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
-                ;
+        return createDeployment(MODULE_NAME);
     }
 
     public RemoteStatefulEJBFailoverTestCase() {

@@ -95,7 +95,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // No events should have been triggered on remote node
@@ -130,7 +131,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // This should trigger attribute replaced event, as well as valueBound/valueUnbound binding events
@@ -151,7 +153,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // No events should have been triggered on remote node
@@ -171,7 +174,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // This should trigger attribute removed event and valueUnbound binding event
@@ -191,7 +195,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // No events should have been triggered on remote node
@@ -210,7 +215,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // This should trigger attribute added event and valueBound binding event
@@ -230,7 +236,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // No events should have been triggered on remote node
@@ -250,7 +257,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // This should trigger attribute removed event and valueUnbound binding event
@@ -270,7 +278,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // No events should have been triggered on remote node
@@ -305,7 +314,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // This should trigger session destroyed event, attribute removed event, and valueUnbound binding event
@@ -326,7 +336,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // This should trigger attribute added event and valueBound binding event
@@ -381,7 +392,8 @@ public abstract class SessionExpirationTestCase extends AbstractClusteringTestCa
             }
 
             if (!this.transactional) {
-                Thread.sleep(AbstractClusteringTestCase.GRACE_TIME_TO_REPLICATE);
+                // Wait for the non-transactional session write of the previous request to complete
+                this.awaitRequestCompletion();
             }
 
             // Trigger session timeout in 1 second

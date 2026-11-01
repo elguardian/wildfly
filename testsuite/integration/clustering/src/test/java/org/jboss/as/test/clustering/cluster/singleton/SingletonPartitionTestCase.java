@@ -12,6 +12,7 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Set;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -62,7 +63,6 @@ public class SingletonPartitionTestCase extends AbstractClusteringTestCase {
     // maximum time in ms to wait for cluster topology change in case the injected merge event fails for some reason
     private static final Duration TOPOLOGY_CHANGE_TIMEOUT = Duration.ofMillis(TimeoutUtil.adjust(150_000));
     // it takes a little extra time after merge for the singleton service to migrate
-    private static final int SERVICE_TIMEOUT = TimeoutUtil.adjust(5_000);
     private static final String CONTAINER = "server";
 
     @Deployment(name = DEPLOYMENT_1, managed = false, testable = false)
@@ -108,7 +108,6 @@ public class SingletonPartitionTestCase extends AbstractClusteringTestCase {
 
         waitForView(baseURL1, NODE_1_2);
         waitForView(baseURL2, NODE_1_2);
-        Thread.sleep(SERVICE_TIMEOUT);
 
 
         // check service A
@@ -124,7 +123,6 @@ public class SingletonPartitionTestCase extends AbstractClusteringTestCase {
         partition(true, baseURL1, baseURL2);
         waitForView(baseURL1, Set.of(NODE_1));
         waitForView(baseURL2, Set.of(NODE_2));
-        Thread.sleep(SERVICE_TIMEOUT);
 
         // check service A
         checkSingletonNode(baseURL1, SingletonServiceActivator.SERVICE_A_NAME, NODE_1);
@@ -139,7 +137,6 @@ public class SingletonPartitionTestCase extends AbstractClusteringTestCase {
         partition(false, baseURL1, baseURL2);
         waitForView(baseURL1, NODE_1_2);
         waitForView(baseURL2, NODE_1_2);
-        Thread.sleep(SERVICE_TIMEOUT);
 
         // check service A
         checkSingletonNode(baseURL1, SingletonServiceActivator.SERVICE_A_NAME, SingletonServiceActivator.SERVICE_A_PREFERRED_NODE);
@@ -154,7 +151,6 @@ public class SingletonPartitionTestCase extends AbstractClusteringTestCase {
         partition(true, baseURL1, baseURL2);
         waitForView(baseURL1, Set.of(NODE_1));
         waitForView(baseURL2, Set.of(NODE_2));
-        Thread.sleep(SERVICE_TIMEOUT);
 
         // check service A
         checkSingletonNode(baseURL1, SingletonServiceActivator.SERVICE_A_NAME, NODE_1);
@@ -173,6 +169,10 @@ public class SingletonPartitionTestCase extends AbstractClusteringTestCase {
         stop(NODE_1_2);
     }
 
+    /**
+     * Checks the provider of a singleton service. With an expected provider, {@link NodeServiceServlet} itself waits until
+     * the singleton has been (re-)elected on that node, so no fixed wait is needed after a view change.
+     */
     private static void checkSingletonNode(URL baseURL, ServiceName serviceName, String expectedProviderNode) throws IOException, URISyntaxException {
         URI uri = (expectedProviderNode != null) ? NodeServiceServlet.createURI(baseURL, serviceName, expectedProviderNode) : NodeServiceServlet.createURI(baseURL, serviceName);
         try (CloseableHttpClient client = TestHttpClientUtils.promiscuousCookieHttpClient()) {
@@ -195,17 +195,23 @@ public class SingletonPartitionTestCase extends AbstractClusteringTestCase {
         TopologyChangeListenerUtil.establishTopology(baseURL, CONTAINER, "default", topology, TOPOLOGY_CHANGE_TIMEOUT);
     }
 
+    /**
+     * Simulates a network partition or merge of the given nodes.
+     * Each step is completed on all nodes before the next one starts, e.g. no node starts discarding messages before every node stored its view.
+     */
     private static void partition(boolean partition, URL... baseURIs) {
-        Arrays.stream(baseURIs).parallel().forEach(baseURI -> {
-            try (CloseableHttpClient client = TestHttpClientUtils.promiscuousCookieHttpClient()) {
-                HttpResponse response = client.execute(new HttpGet(PartitionServlet.createURI(baseURI, partition)));
-                try {
-                    assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
-                } finally {
-                    HttpClientUtils.closeQuietly(response);
+        for (PartitionServlet.Action action : partition ? EnumSet.of(PartitionServlet.Action.PREPARE, PartitionServlet.Action.PARTITION) : EnumSet.of(PartitionServlet.Action.HEAL, PartitionServlet.Action.MERGE)) {
+            Arrays.stream(baseURIs).parallel().forEach(baseURI -> {
+                try (CloseableHttpClient client = TestHttpClientUtils.promiscuousCookieHttpClient()) {
+                    HttpResponse response = client.execute(new HttpGet(PartitionServlet.createURI(baseURI, action)));
+                    try {
+                        assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
+                    } finally {
+                        HttpClientUtils.closeQuietly(response);
+                    }
+                } catch (Exception ignored) {
                 }
-            } catch (Exception ignored) {
-            }
-        });
+            });
+        }
     }
 }

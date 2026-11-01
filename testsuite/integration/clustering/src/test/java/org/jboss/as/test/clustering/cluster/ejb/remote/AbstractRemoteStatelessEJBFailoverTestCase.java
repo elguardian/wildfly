@@ -15,6 +15,7 @@ import java.util.concurrent.Callable;
 import java.util.function.UnaryOperator;
 
 import org.jboss.arquillian.junit5.ArquillianExtension;
+import org.jboss.as.test.clustering.ClusterTestUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Incrementor;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.IncrementorBean;
@@ -22,7 +23,6 @@ import org.jboss.as.test.clustering.cluster.ejb.remote.bean.Result;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.SecureStatelessIncrementorBean;
 import org.jboss.as.test.clustering.cluster.ejb.remote.bean.StatelessIncrementorBean;
 import org.jboss.as.test.clustering.ejb.EJBDirectory;
-import org.jboss.as.test.shared.PermissionUtils;
 import org.jboss.as.test.shared.TimeoutUtil;
 import org.jboss.shrinkwrap.api.Archive;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
@@ -42,10 +42,10 @@ public abstract class AbstractRemoteStatelessEJBFailoverTestCase extends Abstrac
     private static final long INVOCATION_WAIT = TimeoutUtil.adjust(10);
 
     static Archive<?> createDeployment(String moduleName) {
-        return ShrinkWrap.create(JavaArchive.class, moduleName + ".jar")
+        return ClusterTestUtil.addClientMappingsListener(ShrinkWrap.create(JavaArchive.class, moduleName + ".jar"))
                 .addPackage(EJBDirectory.class.getPackage())
                 .addClasses(Result.class, Incrementor.class, IncrementorBean.class, StatelessIncrementorBean.class, SecureStatelessIncrementorBean.class)
-                .addAsManifestResource(PermissionUtils.createPermissionsXmlAsset(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
+                .addAsManifestResource(ClusterTestUtil.clientMappingsListenerPermissions(new PropertyPermission(NODE_NAME_PROPERTY, "read")), "permissions.xml")
                 ;
     }
 
@@ -65,8 +65,8 @@ public abstract class AbstractRemoteStatelessEJBFailoverTestCase extends Abstrac
             try (EJBDirectory directory = this.directoryProvider.get()) {
                 Incrementor bean = directory.lookupStateless(this.beanClass, Incrementor.class);
 
-                // Allow sufficient time for client to receive full topology
-                Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+                // Wait until the cluster topology pushed to EJB clients contains both nodes
+                ClusterTestUtil.establishClientMappings(directory, NODE_1_2);
 
                 List<String> results = new ArrayList<>(COUNT);
                 for (int i = 0; i < COUNT; ++i) {
@@ -93,8 +93,8 @@ public abstract class AbstractRemoteStatelessEJBFailoverTestCase extends Abstrac
 
                 deploy(DEPLOYMENT_1);
 
-                // Allow sufficient time for client to receive new topology
-                Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+                // Wait until the cluster topology pushed to EJB clients contains both nodes again
+                ClusterTestUtil.establishClientMappings(directory, NODE_1_2);
 
                 for (int i = 0; i < COUNT; ++i) {
                     Result<Integer> result = bean.increment();
@@ -120,8 +120,8 @@ public abstract class AbstractRemoteStatelessEJBFailoverTestCase extends Abstrac
 
                 start(NODE_2);
 
-                // Allow sufficient time for client to receive new topology
-                Thread.sleep(EJB_CLIENT_TOPOLOGY_UPDATE_WAIT.toMillis());
+                // Wait until the cluster topology pushed to EJB clients contains both nodes again
+                ClusterTestUtil.establishClientMappings(directory, NODE_1_2);
 
                 for (int i = 0; i < COUNT; ++i) {
                     Result<Integer> result = bean.increment();

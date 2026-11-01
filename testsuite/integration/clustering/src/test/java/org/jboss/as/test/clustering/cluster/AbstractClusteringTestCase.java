@@ -20,6 +20,7 @@ import org.jboss.arquillian.container.spi.ContainerRegistry;
 import org.jboss.arquillian.container.test.api.Deployer;
 import org.jboss.arquillian.test.api.ArquillianResource;
 import org.jboss.as.arquillian.api.WildFlyContainerController;
+import org.jboss.as.test.clustering.ActiveRequestsUtil;
 import org.jboss.as.test.clustering.NodeUtil;
 import org.jboss.as.test.shared.TimeoutUtil;
 import org.jboss.logging.Logger;
@@ -258,6 +259,15 @@ public abstract class AbstractClusteringTestCase {
      */
     protected void stop(Set<String> containers, int suspendTimeout) {
         NodeUtil.stop(this.controller, containers, suspendTimeout);
+    }
+
+    /**
+     * Waits until the started containers of this test have finished processing their requests,
+     * including writing (and replicating) the distributable sessions those requests used.
+     * Use instead of waiting a fixed time for a non-transactional session write to replicate.
+     */
+    protected void awaitRequestCompletion() {
+        ActiveRequestsUtil.awaitNoActiveRequests(this.containers.stream().filter(this::isStarted).sorted().toList());
     }
 
     // Container deployment methods

@@ -31,6 +31,7 @@ import org.jboss.as.arquillian.container.ManagementClient;
 import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.descriptions.ModelDescriptionConstants;
+import org.jboss.as.test.clustering.ActiveRequestsUtil;
 import org.jboss.as.test.clustering.ClusterTestUtil;
 import org.jboss.as.test.clustering.TopologyChangeListenerUtil;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
@@ -120,12 +121,14 @@ public class RankedAffinityTestCase extends AbstractClusteringTestCase {
                 HttpClientUtils.closeQuietly(response);
             }
 
-            // TODO remove workaround for "UNDERTOW-1585 mod_cluster nodes are added in ERROR state" for which we need to wait until first status for ranked affinity to work
-            Thread.sleep(3_000);
-
-            // 2
             ModelControllerClient lbModelControllerClient = TestSuiteEnvironment.getModelControllerClient(null, TestSuiteEnvironment.getServerAddress(), TestSuiteEnvironment.getServerPort() + 500);
             try (ManagementClient lbManagementClient = new ManagementClient(lbModelControllerClient, TestSuiteEnvironment.getServerAddress(), TestSuiteEnvironment.getServerPort() + 500, "remote+http")) {
+                // "UNDERTOW-1585 mod_cluster nodes are added in ERROR state": ranked affinity skips a node until its first status report
+                awaitBalancerNodes(lbManagementClient, NODE_1_2_3);
+                // The session is written after the response was sent
+                ActiveRequestsUtil.awaitNoActiveRequests(NODE_1_2_3);
+
+                // 2
                 String node = previousAffinities[0];
                 ModelNode operation = new ModelNode();
                 operation.get(OP).set(ModelDescriptionConstants.STOP);
@@ -147,8 +150,7 @@ public class RankedAffinityTestCase extends AbstractClusteringTestCase {
                 assertEquals(SUCCESS, result.get(OUTCOME).asString(), result.toString());
                 log.debugf("Operation result: %s", result.toJSONString(false));
 
-                Thread.sleep(GRACE_TIME_TOPOLOGY_CHANGE);
-
+                // The stop operation updates the load balancer synchronously, so subsequent requests already skip the node
                 // 3
                 response = client.execute(new HttpGet(lbURI));
                 try {
@@ -160,6 +162,22 @@ public class RankedAffinityTestCase extends AbstractClusteringTestCase {
                 }
             }
         }
+    }
+
+    /**
+     * Waits until the load balancer knows the given nodes, none of them in error state, each with the test context enabled.
+     */
+    private static void awaitBalancerNodes(ManagementClient client, Set<String> nodes) throws Exception {
+        String request = String.format("/subsystem=undertow/configuration=filter/mod-cluster=load-balancer/balancer=%s:read-children-resources(child-type=node, recursive=true, include-runtime=true)", BALANCER_NAME);
+        String context = "/" + MODULE_NAME;
+        ClusterTestUtil.awaitManagementResult(client, request, result -> nodes.stream().allMatch(node -> {
+            if (!result.hasDefined(node)) return false;
+            ModelNode resource = result.get(node);
+            if (!resource.hasDefined("status") || resource.get("status").asString().equals("NODE_DOWN")) return false;
+            if (!resource.hasDefined("context") || !resource.get("context").hasDefined(context)) return false;
+            ModelNode contextResource = resource.get("context").get(context);
+            return contextResource.hasDefined("status") && contextResource.get("status").asString().equals("enabled");
+        }));
     }
 
     private static void establishTopology(URL baseURL, Set<String> topology) throws URISyntaxException, IOException {

@@ -7,6 +7,10 @@ package org.jboss.as.test.clustering.cluster.dispatcher;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Set;
+
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.container.test.api.TargetsContainer;
 import org.jboss.arquillian.junit5.ArquillianExtension;
@@ -28,7 +32,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 @ExtendWith(ArquillianExtension.class)
 public class CommandDispatcherTestCase extends AbstractClusteringTestCase {
     protected static final String MODULE_NAME = CommandDispatcherTestCase.class.getSimpleName();
-    private static final long VIEW_CHANGE_WAIT = TimeoutUtil.adjust(2000);
+    private static final Duration VIEW_CHANGE_TIMEOUT = Duration.ofMillis(TimeoutUtil.adjust(15000));
+    private static final Duration POLL_INTERVAL = Duration.ofMillis(50);
 
     @Deployment(name = DEPLOYMENT_1, managed = false, testable = false)
     @TargetsContainer(NODE_1)
@@ -61,6 +66,19 @@ public class CommandDispatcherTestCase extends AbstractClusteringTestCase {
         this.test(LegacyClusterTopologyRetrieverBean.class);
     }
 
+    /**
+     * Polls the command dispatcher topology until it contains the expected nodes, and returns that topology.
+     */
+    private static ClusterTopology awaitNodes(ClusterTopologyRetriever bean, Set<String> nodes) throws InterruptedException {
+        Instant stop = Instant.now().plus(VIEW_CHANGE_TIMEOUT);
+        ClusterTopology topology = bean.getClusterTopology();
+        while (!Set.copyOf(topology.getNodes()).equals(nodes) && Instant.now().isBefore(stop)) {
+            Thread.sleep(POLL_INTERVAL.toMillis());
+            topology = bean.getClusterTopology();
+        }
+        return topology;
+    }
+
     public void test(Class<? extends ClusterTopologyRetriever> beanClass) throws Exception {
         try (EJBDirectory directory = new RemoteEJBDirectory(MODULE_NAME)) {
             ClusterTopologyRetriever bean = directory.lookupStateless(beanClass, ClusterTopologyRetriever.class);
@@ -81,9 +99,7 @@ public class CommandDispatcherTestCase extends AbstractClusteringTestCase {
 
             deploy(DEPLOYMENT_2);
 
-            Thread.sleep(VIEW_CHANGE_WAIT);
-
-            topology = bean.getClusterTopology();
+            topology = awaitNodes(bean, NODE_1_2);
             assertEquals(2, topology.getNodes().size());
             assertTrue(topology.getNodes().contains(NODE_1));
             assertTrue(topology.getNodes().contains(NODE_2));
@@ -99,9 +115,7 @@ public class CommandDispatcherTestCase extends AbstractClusteringTestCase {
 
             start(NODE_1);
 
-            Thread.sleep(VIEW_CHANGE_WAIT);
-
-            topology = bean.getClusterTopology();
+            topology = awaitNodes(bean, NODE_1_2);
             assertEquals(2, topology.getNodes().size(), topology.getNodes().toString());
             assertTrue(topology.getNodes().contains(NODE_1), topology.getNodes().toString() + " should contain " + NODE_1);
             assertTrue(topology.getNodes().contains(NODE_2), topology.getNodes().toString() + " should contain " + NODE_2);

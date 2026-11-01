@@ -79,11 +79,8 @@ public abstract class AbstractSessionActivationTestCase extends AbstractClusteri
 
     private void execute(HttpClient client, HttpUriRequest request, boolean failover) throws IOException {
         if (failover && !this.transactional) {
-            try {
-                Thread.sleep(GRACE_TIME_TO_REPLICATE);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            // Wait for the non-transactional session write of the previous request to complete
+            this.awaitRequestCompletion();
         }
 
         HttpResponse response = client.execute(request);

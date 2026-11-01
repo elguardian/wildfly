@@ -13,6 +13,7 @@ import java.net.URL;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -60,11 +61,7 @@ public abstract class AbstractWebFailoverTestCase extends AbstractClusteringTest
         this.nonTxWait = () -> {
             // If the cache is non-transactional, we need to wait for that replication to finish, otherwise the read can be stale
             if (!transactionMode.isTransactional()) {
-                try {
-                    Thread.sleep(GRACE_TIME_TO_REPLICATE);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
+                this.awaitRequestCompletion();
             }
         };
     }
@@ -87,11 +84,12 @@ public abstract class AbstractWebFailoverTestCase extends AbstractClusteringTest
     }
 
     private void testFailover(Lifecycle lifecycle, URL baseURL1, URL baseURL2, URL baseURL3) throws Exception {
+        Map<String, URL> baseURLs = Map.of(NODE_1, baseURL1, NODE_2, baseURL2, NODE_3, baseURL3);
         URI uri1 = SimpleServlet.createURI(baseURL1);
         URI uri2 = SimpleServlet.createURI(baseURL2);
         URI uri3 = SimpleServlet.createURI(baseURL3);
 
-        this.establishTopology(baseURL1, NODE_1_2_3);
+        this.establishTopology(baseURLs, NODE_1_2_3);
         int value = 1;
         // In case updated route information is received, it must be different from the last route
         String lastOwner;
@@ -143,7 +141,7 @@ public abstract class AbstractWebFailoverTestCase extends AbstractClusteringTest
 
             lifecycle.stop(NODE_1);
 
-            this.establishTopology(baseURL2, Set.of(NODE_2, NODE_3));
+            this.establishTopology(baseURLs, Set.of(NODE_2, NODE_3));
 
             // node2
             try (CloseableHttpResponse response = client.execute(new HttpGet(uri2))) {
@@ -192,7 +190,7 @@ public abstract class AbstractWebFailoverTestCase extends AbstractClusteringTest
 
             lifecycle.start(NODE_1);
 
-            this.establishTopology(baseURL2, NODE_1_2_3);
+            this.establishTopology(baseURLs, NODE_1_2_3);
 
             try (CloseableHttpResponse response = client.execute(new HttpGet(uri2))) {
                 assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
@@ -233,7 +231,7 @@ public abstract class AbstractWebFailoverTestCase extends AbstractClusteringTest
 
             lifecycle.stop(NODE_2);
 
-            this.establishTopology(baseURL1, Set.of(NODE_1, NODE_3));
+            this.establishTopology(baseURLs, Set.of(NODE_1, NODE_3));
 
             try (CloseableHttpResponse response = client.execute(new HttpGet(uri1))) {
                 assertEquals(HttpServletResponse.SC_OK, response.getStatusLine().getStatusCode());
@@ -288,7 +286,7 @@ public abstract class AbstractWebFailoverTestCase extends AbstractClusteringTest
 
             lifecycle.start(NODE_2);
 
-            this.establishTopology(baseURL1, NODE_1_2_3);
+            this.establishTopology(baseURLs, NODE_1_2_3);
 
             this.nonTxWait.run();
 
@@ -373,14 +371,14 @@ public abstract class AbstractWebFailoverTestCase extends AbstractClusteringTest
         }
     }
 
-    private void establishTopology(URL baseURL, Set<String> topology) throws URISyntaxException, IOException, InterruptedException {
+    private void establishTopology(Map<String, URL> baseURLs, Set<String> topology) throws URISyntaxException, IOException {
         if (this.cacheMode.isClustered()) {
-            TopologyChangeListenerUtil.establishTopology(baseURL, "web", this.deploymentName, topology);
-
-            // TODO we should be able to speed this up by observing changes in the routing registry
-            // prevents failing assertions when topology information is expected, e.g.:
-            //java.lang.AssertionError: expected null, but was:<bpAmUlICzeXMtFiOJvTiOCASbXNivRdHTIlQC00c=node-2>
-            Thread.sleep(GRACE_TIME_TOPOLOGY_CHANGE);
+            // Wait on every member for the topology and for rebalancing to complete:
+            // topology updates reach members at slightly different times, and non-transactional reads on a member still rebalancing can be stale.
+            // Afterwards the primary owner, i.e. the route, of a session is stable.
+            for (String member : new TreeSet<>(topology)) {
+                TopologyChangeListenerUtil.establishTopology(baseURLs.get(member), "web", this.deploymentName, topology);
+            }
         }
     }
 }
