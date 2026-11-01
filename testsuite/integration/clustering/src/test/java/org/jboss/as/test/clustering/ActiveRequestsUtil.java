@@ -21,6 +21,7 @@ import org.jboss.as.controller.PathAddress;
 import org.jboss.as.controller.client.ModelControllerClient;
 import org.jboss.as.controller.operations.common.Util;
 import org.jboss.as.test.clustering.cluster.AbstractClusteringTestCase;
+import org.jboss.as.test.shared.TimeoutUtil;
 import org.jboss.dmr.ModelNode;
 import org.jboss.logging.Logger;
 
@@ -36,7 +37,7 @@ import org.jboss.logging.Logger;
  */
 public final class ActiveRequestsUtil {
 
-    public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(15);
+    public static final Duration DEFAULT_TIMEOUT = TimeoutUtil.adjust(Duration.ofSeconds(15));
     private static final Duration POLL_INTERVAL = Duration.ofMillis(5);
     private static final ModelNode READ_ACTIVE_REQUESTS = Util.getReadAttributeOperation(PathAddress.pathAddress(SUBSYSTEM, "request-controller"), "active-requests");
     private static final Logger log = Logger.getLogger(ActiveRequestsUtil.class);

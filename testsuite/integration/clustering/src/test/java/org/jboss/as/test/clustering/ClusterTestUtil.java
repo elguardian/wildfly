@@ -69,7 +69,7 @@ public class ClusterTestUtil {
      */
     public static void establishClientMappings(EJBDirectory directory, Set<String> nodes) throws Exception {
         ClientMappingsListener listener = directory.lookupStateless(ClientMappingsListenerBean.class, ClientMappingsListener.class);
-        listener.establishClientMappings(nodes, ClientMappingsListener.DEFAULT_TIMEOUT);
+        listener.establishClientMappings(nodes, TimeoutUtil.adjust(ClientMappingsListener.DEFAULT_TIMEOUT));
     }
 
     /**
@@ -78,7 +78,7 @@ public class ClusterTestUtil {
      */
     public static void establishClientMappings(Context context, String moduleName, Set<String> nodes) throws Exception {
         ClientMappingsListener listener = (ClientMappingsListener) context.lookup("ejb:/" + moduleName + "/" + ClientMappingsListenerBean.class.getSimpleName() + "!" + ClientMappingsListener.class.getName());
-        listener.establishClientMappings(nodes, ClientMappingsListener.DEFAULT_TIMEOUT);
+        listener.establishClientMappings(nodes, TimeoutUtil.adjust(ClientMappingsListener.DEFAULT_TIMEOUT));
     }
 
     public static void establishTopology(EJBDirectory directory, String container, String cache, Set<String> topology) throws Exception {

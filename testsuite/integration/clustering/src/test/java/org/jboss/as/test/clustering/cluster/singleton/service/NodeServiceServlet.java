@@ -18,6 +18,7 @@ import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.jboss.as.test.shared.TimeoutUtil;
 import org.jboss.msc.service.ServiceName;
 import org.wildfly.clustering.group.Node;
 import org.wildfly.common.function.ExceptionFunction;
@@ -31,14 +32,17 @@ public class NodeServiceServlet extends HttpServlet {
     static final String SERVLET_PATH = "/" + SERVLET_NAME;
     private static final String SERVICE = "service";
     private static final String EXPECTED = "expected";
-    private static final Duration TIMEOUT = Duration.ofSeconds(15);
+    private static final String TIMEOUT = "timeout";
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(15);
 
     public static URI createURI(URL baseURL, ServiceName serviceName) throws URISyntaxException {
         return baseURL.toURI().resolve(buildQuery(serviceName).toString());
     }
 
     public static URI createURI(URL baseURL, ServiceName serviceName, String expected) throws URISyntaxException {
-        return baseURL.toURI().resolve(buildQuery(serviceName).append('&').append(EXPECTED).append('=').append(expected).toString());
+        // The wait for the expected node runs on the server, so pass it the timeout adjusted by the client's timeout factor
+        Duration timeout = TimeoutUtil.adjust(DEFAULT_TIMEOUT);
+        return baseURL.toURI().resolve(buildQuery(serviceName).append('&').append(EXPECTED).append('=').append(expected).append('&').append(TIMEOUT).append('=').append(timeout.toMillis()).toString());
     }
 
     private static StringBuilder buildQuery(ServiceName serviceName) {
@@ -49,9 +53,10 @@ public class NodeServiceServlet extends HttpServlet {
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         String serviceName = getRequiredParameter(req, SERVICE);
         String expected = req.getParameter(EXPECTED);
+        String timeout = req.getParameter(TIMEOUT);
         this.log(String.format("Received request for %s, expecting %s", serviceName, expected));
         FunctionExecutor<Supplier<Node>> executor = NodeServiceExecutorRegistry.INSTANCE.getExecutor(ServiceName.parse(serviceName));
-        Instant stop = Instant.now().plus(TIMEOUT);
+        Instant stop = Instant.now().plus((timeout != null) ? Duration.ofMillis(Long.parseLong(timeout)) : DEFAULT_TIMEOUT);
         ExceptionFunction<Supplier<Node>, Node, RuntimeException> function = Supplier::get;
         Node node = executor.execute(function);
         if (expected != null) {
